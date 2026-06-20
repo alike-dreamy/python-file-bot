@@ -500,9 +500,10 @@ def start_bot():
             return
 
         # ===================================================
-        # DM TRADE RESPONSE (Handle before channel check)
+        # DM HANDLING (Including settings and trade responses)
         # ===================================================
         if isinstance(message.channel, discord.DMChannel):
+            # TRADE RESPONSES
             if content_lower in ["!agree", "!decline"]:
                 target_id = message.author.id
 
@@ -600,6 +601,50 @@ def start_bot():
                     del active_trades[target_id]
                 else:
                     await message.reply("❌ No active trades.")
+                return
+
+            # SETTINGS COMMANDS IN DM
+            if content_lower.startswith("!set "):
+                args = content[5:].strip().split()
+                if len(args) < 2:
+                    await message.reply("⚠️ Usage: `!set <type> <value>`\nExample: `!set inventory public`")
+                    return
+                
+                setting_type = args[0].lower()
+                setting_value = " ".join(args[1:]).lower()
+                
+                if setting_type == "inventory":
+                    if setting_value not in ["public", "anonymous", "hidden"]:
+                        await message.reply("❌ Invalid inventory setting. Use: `public`, `anonymous`, or `hidden`")
+                        return
+                    update_user_settings(uid, "inventory_visibility", setting_value)
+                    emoji_map = {"public": "📖", "anonymous": "🔍", "hidden": "🔒"}
+                    await message.reply(f"✅ {emoji_map.get(setting_value, '⚙️')} Inventory visibility changed to **{setting_value}**!")
+                    return
+                
+                elif setting_type == "trading":
+                    if setting_value not in ["allowed", "disabled", "friends"]:
+                        await message.reply("❌ Invalid trading setting. Use: `allowed`, `disabled`, or `friends`")
+                        return
+                    update_user_settings(uid, "trading_status", setting_value)
+                    emoji_map = {"allowed": "✅", "disabled": "❌", "friends": "👥"}
+                    await message.reply(f"✅ {emoji_map.get(setting_value, '⚙️')} Trading status changed to **{setting_value}**!")
+                    return
+                
+                elif setting_type == "hidename":
+                    if setting_value not in ["on", "off"]:
+                        await message.reply("❌ Invalid hidename setting. Use: `on` or `off`")
+                        return
+                    hide_status = setting_value == "on"
+                    update_user_settings(uid, "hide_name", hide_status)
+                    status_text = "🫥 enabled - Your name will be hidden in trade requests" if hide_status else "👤 disabled - Your name will be shown in trade requests"
+                    await message.reply(f"✅ Name hiding **{status_text}**")
+                    return
+                
+                else:
+                    await message.reply("❌ Unknown setting type. Use: `inventory`, `trading`, or `hidename`")
+                    return
+            
             return
 
         # ===================================================
@@ -630,7 +675,7 @@ def start_bot():
             return
 
         # ===================================================
-        # SETTINGS COMMANDS (!set)
+        # SETTINGS COMMANDS (!set) - Also works in regular channels
         # ===================================================
         if content_lower.startswith("!set "):
             args = content[5:].strip().split()
