@@ -63,6 +63,9 @@ ECONOMY_FILE = "economy.json"
 user_wallets = {}
 user_permissions = {}
 
+USER_SETTINGS_FILE = "user_settings.json"
+user_settings = {}
+
 # Bot Personality
 BOT_PERSONALITY = "You are XBot. No AI assistant behavior. No roleplay actions."
 PERSONALITY_FILE = "personality.json"
@@ -74,7 +77,7 @@ TRADE_CHANNEL_ID = 1517627548173861074          # !trade channel
 
 # Load all persistent data
 def load_all_data():
-    global role_shop, user_inventory, user_trade_settings, user_wallets, user_permissions, user_limits, tradeable_roles, sellable_roles, BOT_PERSONALITY
+    global role_shop, user_inventory, user_trade_settings, user_wallets, user_permissions, user_limits, tradeable_roles, sellable_roles, BOT_PERSONALITY, user_settings
     
     if os.path.exists(ROLE_SHOP_FILE):
         try:
@@ -122,6 +125,14 @@ def load_all_data():
                 user_limits = {int(k): v for k, v in data.get("limits", {}).items()}
         except Exception as e:
             print("Failed to load economy:", e)
+    
+    if os.path.exists(USER_SETTINGS_FILE):
+        try:
+            with open(USER_SETTINGS_FILE, "r") as f:
+                data = json.load(f)
+                user_settings = {int(k): v for k, v in data.items()}
+        except Exception as e:
+            print("Failed to load user settings:", e)
     
     if os.path.exists(PERSONALITY_FILE):
         try:
@@ -179,6 +190,13 @@ def save_economy():
     except Exception as e:
         print("Failed to save economy:", e)
 
+def save_user_settings():
+    try:
+        with open(USER_SETTINGS_FILE, "w") as f:
+            json.dump({str(k): v for k, v in user_settings.items()}, f, indent=2)
+    except Exception as e:
+        print("Failed to save user settings:", e)
+
 def save_personality():
     try:
         with open(PERSONALITY_FILE, "w") as f:
@@ -208,6 +226,22 @@ def grant_permission(uid, perm_node, value=True):
         user_permissions[uid] = {}
     user_permissions[uid][perm_node] = value
     save_economy()
+
+def get_user_settings(uid):
+    if uid not in user_settings:
+        user_settings[uid] = {
+            "inventory_visibility": "public",
+            "trading_status": "allowed",
+            "hide_name": False
+        }
+        save_user_settings()
+    return user_settings[uid]
+
+def update_user_settings(uid, key, value):
+    settings = get_user_settings(uid)
+    settings[key] = value
+    user_settings[uid] = settings
+    save_user_settings()
 
 # =========================
 # MEMORY SYSTEM
@@ -582,7 +616,10 @@ def start_bot():
                 "🔄 **TRADING SETTINGS:**\n"
                 "`!set trading allowed` - Everyone can trade with you\n"
                 "`!set trading disabled` - No one can trade with you\n"
-                "`!set trading friends` - Friends only\n"
+                "`!set trading friends` - Friends only\n\n"
+                "👤 **NAME VISIBILITY:**\n"
+                "`!set hidename on` - Hide your name in trade requests (shows 'Hidden Name')\n"
+                "`!set hidename off` - Show your name in trade requests\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             )
             try:
@@ -591,6 +628,48 @@ def start_bot():
             except:
                 await message.reply("❌ I can't send you DMs. Check your privacy settings.")
             return
+
+        # ===================================================
+        # SETTINGS COMMANDS (!set)
+        # ===================================================
+        if content_lower.startswith("!set "):
+            args = content[5:].strip().split()
+            if len(args) < 2:
+                await message.reply("⚠️ Usage: `!set <type> <value>`\nExample: `!set inventory public`")
+                return
+            
+            setting_type = args[0].lower()
+            setting_value = " ".join(args[1:]).lower()
+            
+            if setting_type == "inventory":
+                if setting_value not in ["public", "anonymous", "hidden"]:
+                    await message.reply("❌ Invalid inventory setting. Use: `public`, `anonymous`, or `hidden`")
+                    return
+                update_user_settings(uid, "inventory_visibility", setting_value)
+                await message.reply(f"✅ Inventory visibility set to **{setting_value}**")
+                return
+            
+            elif setting_type == "trading":
+                if setting_value not in ["allowed", "disabled", "friends"]:
+                    await message.reply("❌ Invalid trading setting. Use: `allowed`, `disabled`, or `friends`")
+                    return
+                update_user_settings(uid, "trading_status", setting_value)
+                await message.reply(f"✅ Trading status set to **{setting_value}**")
+                return
+            
+            elif setting_type == "hidename":
+                if setting_value not in ["on", "off"]:
+                    await message.reply("❌ Invalid hidename setting. Use: `on` or `off`")
+                    return
+                hide_status = setting_value == "on"
+                update_user_settings(uid, "hide_name", hide_status)
+                status = "enabled" if hide_status else "disabled"
+                await message.reply(f"✅ Name hiding **{status}**")
+                return
+            
+            else:
+                await message.reply("❌ Unknown setting type. Use: `inventory`, `trading`, or `hidename`")
+                return
 
         # ===================================================
         # ABILITIES SHOP SYSTEM - Only in designated channel
@@ -1015,6 +1094,10 @@ def start_bot():
             take_role_names = [info['role_name'] for info in take_infos]
             give_role_names = [info['role_name'] for info in matched_give_infos] if matched_give_infos else []
             
+            # Check if initiator has name hiding enabled
+            initiator_settings = get_user_settings(uid)
+            display_name = "Hidden Name" if initiator_settings.get("hide_name", False) else initiator_member.display_name
+            
             active_trades[target_member.id] = {
                 "initiator_id": uid,
                 "channel_id": message.channel.id,
@@ -1039,7 +1122,7 @@ def start_bot():
                 await target_member.send(
                     f"🔔 **Incoming Role Trade Request!**\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"👤 **{initiator_member.display_name}** wants to trade with you.\n\n"
+                    f"👤 **{display_name}** wants to trade with you.\n\n"
                     f"{trade_summary}"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"👉 *Type `!agree` to confirm, or `!decline` to cancel.*"
