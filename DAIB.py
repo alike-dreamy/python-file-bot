@@ -646,7 +646,8 @@ def start_bot():
                     await message.reply("❌ Invalid inventory setting. Use: `public`, `anonymous`, or `hidden`")
                     return
                 update_user_settings(uid, "inventory_visibility", setting_value)
-                await message.reply(f"✅ Inventory visibility set to **{setting_value}**")
+                emoji_map = {"public": "📖", "anonymous": "🔍", "hidden": "🔒"}
+                await message.reply(f"✅ {emoji_map.get(setting_value, '⚙️')} Inventory visibility changed to **{setting_value}**!")
                 return
             
             elif setting_type == "trading":
@@ -654,7 +655,8 @@ def start_bot():
                     await message.reply("❌ Invalid trading setting. Use: `allowed`, `disabled`, or `friends`")
                     return
                 update_user_settings(uid, "trading_status", setting_value)
-                await message.reply(f"✅ Trading status set to **{setting_value}**")
+                emoji_map = {"allowed": "✅", "disabled": "❌", "friends": "👥"}
+                await message.reply(f"✅ {emoji_map.get(setting_value, '⚙️')} Trading status changed to **{setting_value}**!")
                 return
             
             elif setting_type == "hidename":
@@ -663,13 +665,75 @@ def start_bot():
                     return
                 hide_status = setting_value == "on"
                 update_user_settings(uid, "hide_name", hide_status)
-                status = "enabled" if hide_status else "disabled"
-                await message.reply(f"✅ Name hiding **{status}**")
+                status_text = "🫥 enabled - Your name will be hidden in trade requests" if hide_status else "👤 disabled - Your name will be shown in trade requests"
+                await message.reply(f"✅ Name hiding **{status_text}**")
                 return
             
             else:
                 await message.reply("❌ Unknown setting type. Use: `inventory`, `trading`, or `hidename`")
                 return
+
+        # ===================================================
+        # INVENTORY VIEWER (!inv @user)
+        # ===================================================
+        if content_lower.startswith("!inv "):
+            if not message.mentions:
+                await message.reply("⚠️ Usage: `!inv @user`")
+                return
+            
+            target_member = message.mentions[0]
+            target_uid = target_member.id
+            
+            target_settings = get_user_settings(target_uid)
+            inventory_visibility = target_settings.get("inventory_visibility", "public")
+            
+            # Check if inventory is hidden
+            if inventory_visibility == "hidden":
+                await message.reply(f"🔒 **{target_member.display_name}**'s inventory is hidden.")
+                return
+            
+            # Check if user has inventory
+            if target_uid not in user_inventory or not user_inventory[target_uid]:
+                await message.reply(f"📦 **{target_member.display_name}** has an empty inventory.")
+                return
+            
+            # Build inventory display
+            inventory_text = f"📦 **{target_member.display_name}'s Inventory**\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            tradeable_roles_list = []
+            sellable_roles_list = []
+            
+            for code, info in user_inventory[target_uid].items():
+                if inventory_visibility == "anonymous":
+                    # Hide role codes
+                    role_str = f"• {info['role_name']}"
+                else:
+                    # Show codes (public)
+                    role_str = f"• **[{code}]** {info['role_name']}"
+                
+                if code in tradeable_roles:
+                    tradeable_roles_list.append(role_str)
+                if code in sellable_roles:
+                    sell_price = sellable_roles[code]['sell_price']
+                    sellable_roles_list.append(role_str + f" (Sell for: **{sell_price} Coins**)")
+            
+            if tradeable_roles_list:
+                inventory_text += f"**🔄 TRADEABLE ROLES:**\n" + "\n".join(tradeable_roles_list) + "\n\n"
+            
+            if sellable_roles_list:
+                inventory_text += f"**💰 SELLABLE ROLES:**\n" + "\n".join(sellable_roles_list) + "\n\n"
+            
+            if not tradeable_roles_list and not sellable_roles_list:
+                inventory_text += "No tradeable or sellable roles.\n\n"
+            
+            # Add stats
+            coins = get_coins(target_uid)
+            limit = user_limits.get(target_uid, DEFAULT_LIMIT)
+            inventory_text += f"**💰 Coins:** {coins}\n"
+            inventory_text += f"**📉 Chat Limit:** {limit}"
+            
+            await message.reply(inventory_text)
+            return
 
         # ===================================================
         # ABILITIES SHOP SYSTEM - Only in designated channel
@@ -946,6 +1010,14 @@ def start_bot():
                 return
             if target_member.bot:
                 await message.reply("❌ Bots cannot trade.")
+                return
+
+            # Check target's trading settings
+            target_settings = get_user_settings(target_member.id)
+            target_trading_status = target_settings.get("trading_status", "allowed")
+            
+            if target_trading_status == "disabled":
+                await message.reply(f"❌ **{target_member.display_name}** has trading disabled.")
                 return
 
             # Get tradeable roles the target has
